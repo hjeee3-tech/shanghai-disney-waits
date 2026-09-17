@@ -1,0 +1,40 @@
+name: collect-wait-times
+
+on:
+  schedule:
+    # 08:00–22:30 KST = 23:00–13:30 UTC
+    - cron: "*/5 23 * * *"
+    - cron: "*/5 0-13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Stop after trip period
+        id: gate
+        run: |
+          if [ "$(date -u +%Y%m%d)" -gt 20261017 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+      - name: Collect
+        if: steps.gate.outputs.run == 'true'
+        run: python3 collect.py && tail -n 1 collect.log
+      - name: Commit
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data collect.log .last_updated
+          if git diff --cached --quiet; then echo "no new data"; exit 0; fi
+          git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3; do git pull --rebase && git push && exit 0; sleep 5; done
+          exit 1
